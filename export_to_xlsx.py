@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import sys
 import os
@@ -8,29 +8,33 @@ import logging.handlers
 import xmltodict
 import xlsxwriter
 
-log_level = logging.DEBUG
+def main():
 
+    log_dir = "logs"
+    log_file = "%s/tmpl2xlsx.log" % log_dir
+    tmpl_dir = "templates"
+    xlsx_dir = "excel"
+
+    tmpl_files = os.listdir(tmpl_dir)
+
+    excelfile = '%s/items.xlsx' % xlsx_dir
+
+    #for tmpl_file in tmpl_files:
+    infile = "%s/%s" % (tmpl_dir, tmpl_files)
+
+    workbook = xlsxwriter.Workbook(excelfile)
+
+    for tmpl_file in tmpl_files:
+        infile = "%s/%s" % (tmpl_dir, tmpl_file)
+        tmpl2xlsx(infile, xlsx_dir, workbook)
+    workbook.close()
 
 def tmpl2xlsx(infile, xlsx_dir, workbook):
-    logger = logging.getLogger('tom')
-    logger.info("Processing file %s" % infile)
-
     with open(infile, 'r', encoding="utf-8") as f:
         file_content = f.read()
         f.close
 
-    # logger.debug("Content of file:\n%s" % file_content)
-    content = xmltodict.parse(file_content)
-    pcontent = json.dumps(content, indent=4, separators=(',', ': '))
-    logger.debug("Parsed content:\n%s" % pcontent)
-    content = json.loads(pcontent)
-
-    templates = content['zabbix_export']['templates']['template']
-    if type(templates) is dict:
-        templates = [templates]
-    # triggers = content['zabbix_export']['triggers']
-    # graphs = content['zabbix_export']['graphs']
-    # value_maps = content['zabbix_export']['value_maps']
+# Описываем шрифты ----=====НАЧАЛО=====------
 
     bold = workbook.add_format(
         {
@@ -63,21 +67,29 @@ def tmpl2xlsx(infile, xlsx_dir, workbook):
         'HIGH': workbook.add_format({'bg_color': '#E97659'}),
         'DISASTER': workbook.add_format({'bg_color': '#E45959'})
     }
+        
+# Описываем шрифты ----=====КОНЕЦ=====------
+
+    content = xmltodict.parse(file_content)
+    pcontent = json.dumps(content, indent=4, separators=(',', ': '))
+    content = json.loads(pcontent)
+    templates = content['zabbix_export']['templates']['template']
+    if type(templates) is dict:
+        templates = [templates]
+    
+    n = 0
+    t = 0
 
     for template in templates:
-        logger.info("Processing template '%s'" % template['template'])
-        logger.info("Adding worksheet")
         max_length_A = 0
         max_length_B = 0
         max_length_C = 0
         try:
             worksheet = workbook.add_worksheet(template['template'][0:30])
         except Exception as ex:
-            logger.error("Error while adding worksheet")
-            logger.error(ex)
+
             continue
 
-        logger.info("Adding title and common info about template")
         worksheet.write('A1', template['name'], bold)
         worksheet.write('A2', template.get('description', 'No description'))
 
@@ -85,260 +97,152 @@ def tmpl2xlsx(infile, xlsx_dir, workbook):
         worksheet.write('A5', "Name", item_header)
         worksheet.write('B5', "Key", item_header)
         worksheet.write('C5', "Description", item_header)
+        worksheet.write('E5', "Trigger name", item_header)
 
-        logger.info("Adding System Items")
         worksheet.merge_range('A6:C6', "System items", item_header)
 
         index = 7
-        if 'items' in template:
-            items = template['items']['item']
-            if type(items) is dict:
-                items = [items]
 
-            for item in items:
-                worksheet.write('A%s' % index, item['name'], item_text)
-                worksheet.write('B%s' % index, item['key'], item_text)
-                worksheet.write('C%s' % index, item.get('description', ''),
-                                item_text)
-                max_length_A = max(max_length_A, len(item['name']))
-                max_length_B = max(max_length_B, len(item['key']))
-                max_length_C = max(max_length_C,
-                                   len(str(item.get('description', ''))))
+        for items_c in (content['zabbix_export']['templates']['template']['items']['item']):
+            t = t + 1
+#            worksheet.write('A%s' % index, items_c['name'], item_text)               # Записываем метрику В excel
+
+            if "triggers" in items_c:                                                # Условие при котором у метрики есть триггер
+                worksheet.write('A%s' % index, items_c['name'], item_text)
+                if type(items_c['triggers']['trigger']) is dict:
+                    worksheet.write('E%s' % index, items_c['triggers']['trigger']['name'], item_text)
+                    index = index + 1
+
+                else:
+                    worksheet.write('A%s' % index, items_c['name'], item_text)
+                    type(items_c['triggers']['trigger']) is list
+                    triggers_circle = (items_c['triggers']['trigger'])
+                    for triggers_c in triggers_circle:
+                        worksheet.write('E%s' % index, triggers_c['name'], item_text)
+                        index = index + 1
+
+            else:                                                                    # Условие при котором у метрики отсутствует триггер
+                worksheet.write('A%s' % index, items_c['name'], item_text)
+                n = n + 1
                 index = index + 1
 
-        worksheet.set_column('A:A', max_length_A)
-        worksheet.set_column('B:B', max_length_B)
-        worksheet.set_column('C:C', max_length_C)
 
-        logger.info("Adding Discovery rules")
+        templates = content['zabbix_export']['templates']['template']
+
+        #### PROTOTIPES ####
 
         if 'discovery_rules' in template:
             if template['discovery_rules'] is None:
                 continue
             drs = template['discovery_rules']['discovery_rule']
-            if type(drs) is dict:
+            if type(drs) is dict:                                                                   ##### БУДЕТ DICT если есть только одно правило обнаружения ####
                 drs = [drs]
 
-            for dr in drs:
-                logger.info("Processing rule '%s'" % dr['name'])
+                for dr in drs:
+                    worksheet.merge_range('A%s:C%s' % (index, index),dr['name'], item_header)       ##### Вписываем название правила обнаружения ####
+                    index = index + 1
 
-                worksheet.merge_range('A%s:C%s' % (index, index),
-                                      dr['name'], item_header)
-                index = index + 1
+                    if 'item_prototypes' in dr:                                                     ##### Условие. Если есть 'item_prototypes' то .. ####
+                        items = dr['item_prototypes']['item_prototype']
+                        if type(items) is dict:                                                     ##### БУДЕТ DICT если есть только один item прототип ####
 
-                logger.info("Adding item prototypes")
-
-                if 'item_prototypes' in dr:
-                    items = dr['item_prototypes']['item_prototype']
-                    if type(items) is dict:
-                        items = [items]
-
-                    for item in items:
-                        worksheet.write('A%s' % index, item['name'], item_text)
-                        worksheet.write('B%s' % index, item['key'], item_text)
-                        worksheet.write('C%s' % index,
-                                        item.get('description', ''), item_text)
-                        max_length_A = max(max_length_A, len(item['name']))
-                        max_length_B = max(max_length_B, len(item['key']))
-                        max_length_C = max(
-                            max_length_C,
-                            len(str(item.get('description', '')))
-                            )
-                        index = index + 1
-
-        else:
-            logger.info("No discovery rules found. Go to triggers")
-
-        logger.info("Adding triggers")
-
-        index = index + 1
-        worksheet.write('A%s' % index, "Triggers:", bold)
-        index = index + 1
-        worksheet.write('A%s' % index, "Name", item_header)
-        worksheet.write('B%s' % index, "Expression", item_header)
-        worksheet.write('C%s' % index, "Severity", item_header)
-
-        index = index + 1
-        logger.info("Adding System Triggers")
-        worksheet.merge_range(
-            'A%s:C%s' % (index, index), "System triggers", item_header)
-
-        index = index + 1
-        if "triggers" in content['zabbix_export']:
-            triggers = content['zabbix_export']['triggers']['trigger']
-            if type(triggers) is dict:
-                triggers = [triggers]
-
-            for trigger in triggers:
-                logger.info("Adding system trigger %s" % trigger['name'])
-                worksheet.write('A%s' % index, trigger['name'],
-                                trigger_severity[trigger['priority']])
-                worksheet.write('B%s' % index, trigger['expression'],
-                                trigger_severity[trigger['priority']])
-                worksheet.write('C%s' % index, trigger['priority'],
-                                trigger_severity[trigger['priority']])
-                max_length_A = max(max_length_A, len(trigger['name']))
-                max_length_B = max(max_length_B, len(trigger['expression']))
-                max_length_C = max(max_length_C, len('Description'))
-                index = index + 1
-
-        logger.info("Adding triggers from items")
-        if 'items' in template:
-            items = template['items']['item']
-            if type(items) is dict:
-                items = [items]
-
-            for item in items:
-                if "triggers" in item:
-                    triggers = item['triggers']['trigger']
-                    if type(triggers) is dict:
-                        triggers = [triggers]
-                    for trigger in triggers:
-                        logger.info(
-                            "Adding item trigger <%s>" % trigger['name'])
-                        trigger_exp = trigger['expression'].replace(":", "-")
-                        logger.info(trigger_exp)
-                        worksheet.write('A%s' % index, trigger['name'],
-                                        trigger_severity[trigger['priority']])
-                        worksheet.write('B%s' % index, trigger_exp,
-                                        trigger_severity[trigger['priority']])
-                        worksheet.write('C%s' % index, trigger['priority'],
-                                        trigger_severity[trigger['priority']])
-                        max_length_A = max(max_length_A, len(trigger['name']))
-                        max_length_B = max(max_length_B,
-                                           len(trigger['expression']))
-                        max_length_C = max(max_length_C, len('Description'))
-                        index = index + 1
-
-        logger.info("Adding Discovery rules")
-
-        if 'discovery_rules' in template:
-            drs = template['discovery_rules']['discovery_rule']
-            if type(drs) is dict:
-                drs = [drs]
-
-            for dr in drs:
-                logger.info("Processing rule '%s'" % dr['name'])
-
-                worksheet.merge_range('A%s:C%s' % (index, index),
-                                      dr['name'], item_header)
-                index = index + 1
-
-                logger.info("Adding trigger prototypes")
-
-                if 'trigger_prototypes' in dr:
-                    triggers = dr['trigger_prototypes']['trigger_prototype']
-                    if type(triggers) is dict:
-                        triggers = [triggers]
-
-                    for trigger in triggers:
-                        worksheet.write('A%s' % index, trigger['name'],
-                                        trigger_severity[trigger['priority']])
-                        worksheet.write('B%s' % index, trigger['expression'],
-                                        trigger_severity[trigger['priority']])
-                        worksheet.write('C%s' % index, trigger['priority'],
-                                        trigger_severity[trigger['priority']])
-                        max_length_A = max(max_length_A, len(trigger['name']))
-                        max_length_B = max(max_length_B,
-                                           len(trigger['expression']))
-                        max_length_C = max(max_length_C, len('Description'))
-                        index = index + 1
-
-                logger.info("Adding trigger prototypes from item prototypes")
-                if 'item_prototypes' in dr:
-                    items = dr['item_prototypes']['item_prototype']
-                    if type(items) is dict:
-                        items = [items]
-
-                    for item in items:
-                        triggers = []
-                        if "trigger_prototypes" in item:
-                            triggers =\
-                                item['trigger_prototypes']['trigger_prototype']
-                        if type(triggers) is dict:
-                            triggers = [triggers]
-                        for trigger in triggers:
-                            logger.info(
-                                "Adding item trigger <%s>" % trigger['name'])
-                            trigger_exp = trigger['expression'].\
-                                replace(":", "-")
-                            logger.info(trigger_exp)
-                            worksheet.write(
-                                'A%s' % index, trigger['name'],
-                                trigger_severity[trigger['priority']])
-                            worksheet.write(
-                                'B%s' % index, trigger_exp,
-                                trigger_severity[trigger['priority']])
-                            worksheet.write(
-                                'C%s' % index, trigger['priority'],
-                                trigger_severity[trigger['priority']])
-                            max_length_A = max(
-                                max_length_A, len(trigger['name']))
-                            max_length_B = max(
-                                max_length_B, len(trigger['expression']))
+                            worksheet.write('A%s' % index, items['name'], item_text)                ##### Заполняем поля name, key, description для метрики ####
+                            worksheet.write('B%s' % index, items['key'], item_text)
+                            worksheet.write('C%s' % index, items.get('description', ''), item_text)
+                            max_length_A = max(max_length_A, len(items['name']))
+                            max_length_B = max(max_length_B, len(items['key']))
                             max_length_C = max(
-                                max_length_C, len('Description'))
-                            index = index + 1
+                                max_length_C,
+                                len(str(items.get('description', '')))
+                                )
 
-        else:
-            logger.info("No discovery rules found. Go to next template")
+                            if 'trigger_prototypes' in items:                                           #### Если есть прототипы триггеров, записываем их в файл ####
+                                triggers_p_circle = items['trigger_prototypes']['trigger_prototype']
+                                for trigger_p_c in triggers_p_circle:
+                                    worksheet.write('E%s' % index, trigger_p_c['name'], item_text)
+                                    index = index + 1
 
-    worksheet.set_column('A:A', max_length_A)
-    worksheet.set_column('B:B', max_length_B)
-    worksheet.set_column('C:C', max_length_C)
+                        else:                                                                           ##### БУДЕТ LIST если несколько item прототип ####
 
+                            for items_circle in items:
+                                worksheet.write('A%s' % index, items_circle['name'], item_text)                ##### Заполняем поля name, key, description для метрики ####
+                                worksheet.write('B%s' % index, items_circle['key'], item_text)
+                                worksheet.write('C%s' % index, items_circle.get('description', ''), item_text)
+                                max_length_A = max(max_length_A, len(items_circle['name']))
+                                max_length_B = max(max_length_B, len(items_circle['key']))
+                                max_length_C = max(
+                                max_length_C,
+                                len(str(items_circle.get('description', '')))
+                                )
+                                if 'trigger_prototypes' in items_circle:                                           #### Если есть прототипы триггеров, записываем их в файл ####
+                                    triggers_p_circle_n = items_circle['trigger_prototypes']['trigger_prototype']
+                                    if type(triggers_p_circle_n) is dict:
 
-def log_exception_handler(type, value, tb):
-    logger = logging.getLogger('tom')
-    logger.exception("Uncaught exception: {0}".format(str(value)))
+                                        worksheet.write('E%s' % index, triggers_p_circle_n['name'], item_text)
+                                        index = index + 1
+                                    else:
+                                        for trigger_p_c in triggers_p_circle_n:
+                                            worksheet.write('E%s' % index, trigger_p_c['name'], item_text)
+                                            index = index + 1
 
+                                else:
+                                    index = index + 1
 
-def setup_logging(log_file):
-    my_logger = logging.getLogger('tom')
-    my_logger.setLevel(log_level)
+            else:                                                                                        # Если в дискавери больше одного правила
+                print(type(drs))
+                for dr in drs:
+                    print(dr)
+                    print()
+                    worksheet.merge_range('A%s:C%s' % (index, index),dr['name'], item_header)
+                    index = index + 1
+                    
+                    if 'item_prototypes' in dr:                                                     ##### Условие. Если есть 'item_prototypes' то .. ####
+                        items = dr['item_prototypes']['item_prototype']
+                        if type(items) is dict:                                                     ##### БУДЕТ DICT если есть только один item прототип ####
 
-    handler = logging.handlers.RotatingFileHandler(
-                          log_file, maxBytes=5120000, backupCount=5)
+                            worksheet.write('A%s' % index, items['name'], item_text)                ##### Заполняем поля name, key, description для метрики ####
+                            worksheet.write('B%s' % index, items['key'], item_text)
+                            worksheet.write('C%s' % index, items.get('description', ''), item_text)
+                            max_length_A = max(max_length_A, len(items['name']))
+                            max_length_B = max(max_length_B, len(items['key']))
+                            max_length_C = max(
+                                max_length_C,
+                                len(str(items.get('description', '')))
+                                )
 
-    formatter = logging.Formatter(
-        '[%(asctime)s] %(levelname)s [%(process)d] %(message)s')
-    handler.setFormatter(formatter)
+                            if 'trigger_prototypes' in items:                                           #### Если есть прототипы триггеров, записываем их в файл ####
+                                triggers_p_circle = items['trigger_prototypes']['trigger_prototype']
+                                for trigger_p_c in triggers_p_circle:
+                                    worksheet.write('E%s' % index, trigger_p_c['name'], item_text)
+                                    index = index + 1
+                            
+                            else:
+                                index = index + 1
 
-    my_logger.addHandler(handler)
+                        else:                                                                           ##### БУДЕТ LIST если несколько item прототип ####
 
-    sys.excepthook = log_exception_handler
+                            for items_circle in items:
+                                worksheet.write('A%s' % index, items_circle['name'], item_text)                ##### Заполняем поля name, key, description для метрики ####
+                                worksheet.write('B%s' % index, items_circle['key'], item_text)
+                                worksheet.write('C%s' % index, items_circle.get('description', ''), item_text)
+                                max_length_A = max(max_length_A, len(items_circle['name']))
+                                max_length_B = max(max_length_B, len(items_circle['key']))
+                                max_length_C = max(
+                                max_length_C,
+                                len(str(items_circle.get('description', '')))
+                                )
+                                if 'trigger_prototypes' in items_circle:                                           #### Если есть прототипы триггеров, записываем их в файл ####
+                                    triggers_p_circle_n = items_circle['trigger_prototypes']['trigger_prototype']
+                                    if type(triggers_p_circle_n) is dict:
+                                        worksheet.write('E%s' % index, triggers_p_circle_n['name'], item_text)
+                                        index = index + 1
+                                    else:
+                                        for trigger_p_c in triggers_p_circle_n:
+                                            worksheet.write('E%s' % index, trigger_p_c['name'], item_text)
+                                            index = index + 1
 
-    return
-
-
-def main():
-    global log_level
-    log_dir = "logs"
-    log_file = "%s/tmpl2xlsx.log" % log_dir
-    tmpl_dir = "templates"
-    xlsx_dir = "excel"
-
-    setup_logging(log_file)
-
-    logger = logging.getLogger('tom')
-    logger.info("Starting")
-
-    tmpl_files = os.listdir(tmpl_dir)
-    logger.info("Template files: %s" % tmpl_files)
-
-    excelfile = '%s/items.xlsx' % xlsx_dir
-    logger.info("Output file: %s" % excelfile)
-    workbook = xlsxwriter.Workbook(excelfile)
-    for tmpl_file in tmpl_files:
-        infile = "%s/%s" % (tmpl_dir, tmpl_file)
-        tmpl2xlsx(infile, xlsx_dir, workbook)
-
-    workbook.close()
-
-    logger.info("Done")
-    print("Done")
-
+                                else:
+                                    index = index + 1
 
 if __name__ == "__main__":
     main()
-    
